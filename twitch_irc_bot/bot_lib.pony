@@ -2,6 +2,23 @@ use "buffered"
 use "debug"
 use "net"
 
+primitive SplitPrefix
+  fun apply(prefix: String): (String, String, String) =>
+    let parts = prefix.split("!@")
+    (try parts(0)? else "" end,
+     try parts(1)? else "" end,
+     try parts(2)? else "" end)
+
+primitive IRCCommand
+  fun join(conn: TCPConnection, channel_name: String) =>
+    conn.write("JOIN :" + channel_name + "\r\n")
+
+  fun part(conn: TCPConnection, channel_name: String) =>
+    conn.write("PART :" + channel_name + "\r\n")
+
+  fun privmsg(conn: TCPConnection, channel_name: String, msg: String) =>
+    conn.write("PRIVMSG " + channel_name + " :" + msg + "\r\n")
+
 primitive IRCMessageString
   fun apply(msg: String): String =>
     msg + "\r\n"
@@ -56,7 +73,7 @@ class TwitchChatConnectionNotify is TCPConnectionNotify
   fun ref _process_message(msg: String, conn: TCPConnection ref) =>
     if msg.contains("You are in a maze of twisty passages, all alike.") then
       for c in _channels.values() do
-        conn.write(IRCMessageString("JOIN :#" + c))
+        IRCCommand.join(conn, "#" + c)
       end
     end
 
@@ -114,17 +131,25 @@ class TwitchChatConnectionNotify is TCPConnectionNotify
       Debug("  [" + " ".join(params.values()) + "]")
 
       match command
-      | "366" =>
-        Debug("FOUND 366")
-        conn.write(IRCMessageString("PRIVMSG #aturls :Wilbur!"))
       | "PING" =>
-        Debug("GOT PING")
-        Debug("SENDING PONG " + params(1)?)
-        conn.write(IRCMessageString("PONG " + params(1)?))
+        _irc_message_responder.ping(conn, params(0)?)
       | "PRIVMSG" =>
-        _irc_message_responder.privmsg(conn, params(0)?, params(1)?)
+        _irc_message_responder.privmsg(conn, prefix, params(0)?, params(1)?)
+      else
+        _irc_message_responder.command(conn, prefix, command, params)
       end
     end
 
 interface IRCMessageResponder
-  fun privmsg(conn: TCPConnection, chan: String, msg: String)
+  fun ref privmsg(conn: TCPConnection, prefix: String, chan: String,
+    msg: String)
+
+  fun ref ping(conn: TCPConnection, param: String) =>
+    Debug("GOT PING")
+    Debug("SENDING PONG " + param)
+    conn.write(IRCMessageString("PONG " + param))
+
+  fun ref command(conn: TCPConnection, prefix: String, command_name: String,
+    params: Array[String])
+  =>
+    None
