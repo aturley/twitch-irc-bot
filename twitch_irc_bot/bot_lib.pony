@@ -28,21 +28,22 @@ class TwitchChatConnectionNotify is TCPConnectionNotify
   let _password: String
   let _channels: Array[String] val
   let _reader: Reader
-  let _irc_message_responder: IRCMessageResponder
+  let _irc_message_responder: IRCMessageResponder tag
 
   new iso create(nick: String, password: String, channels: Array[String] val,
-    irc_message_responder: IRCMessageResponder iso)
+    irc_message_responder: IRCMessageResponder tag)
   =>
     _nick = nick
     _password = password
     _channels = channels
     _reader = Reader
-    _irc_message_responder = consume irc_message_responder
+    _irc_message_responder = irc_message_responder
 
   fun ref connected(conn: TCPConnection ref) =>
     Debug("CONNECTED!")
     conn.write(IRCMessageString("PASS " + _password))
     conn.write(IRCMessageString("NICK " + _nick))
+    _irc_message_responder.connected(conn)
 
   fun ref received(
     conn: TCPConnection ref,
@@ -104,7 +105,7 @@ class TwitchChatConnectionNotify is TCPConnectionNotify
 
       // look for "param1 param2 ... :param_trailing"
 
-      let params = Array[String]
+      let params = recover iso Array[String] end
 
       while rest != "" do
         Debug("rest='" + rest + "'")
@@ -125,31 +126,35 @@ class TwitchChatConnectionNotify is TCPConnectionNotify
         end
       end
 
+      let params': Array[String] val = consume params
+
       Debug("RECEIVED")
       Debug("  prefix='" + prefix + "'")
       Debug("  command='" + command + "'")
-      Debug("  [" + " ".join(params.values()) + "]")
+      Debug("  [" + " ".join(params'.values()) + "]")
 
       match command
       | "PING" =>
-        _irc_message_responder.ping(conn, params(0)?)
+        _irc_message_responder.ping(conn, params'(0)?)
       | "PRIVMSG" =>
-        _irc_message_responder.privmsg(conn, prefix, params(0)?, params(1)?)
+        _irc_message_responder.privmsg(conn, prefix, params'(0)?, params'(1)?)
       else
-        _irc_message_responder.command(conn, prefix, command, params)
+        _irc_message_responder.command(conn, prefix, command, params')
       end
     end
 
 interface IRCMessageResponder
-  fun ref privmsg(conn: TCPConnection, prefix: String, chan: String,
+  be connected(conn: TCPConnection)
+
+  be privmsg(conn: TCPConnection, prefix: String, chan: String,
     msg: String)
 
-  fun ref ping(conn: TCPConnection, param: String) =>
+  be ping(conn: TCPConnection, param: String) =>
     Debug("GOT PING")
     Debug("SENDING PONG " + param)
     conn.write(IRCMessageString("PONG " + param))
 
-  fun ref command(conn: TCPConnection, prefix: String, command_name: String,
-    params: Array[String])
+  be command(conn: TCPConnection, prefix: String, command_name: String,
+    params: Array[String] val)
   =>
     None
